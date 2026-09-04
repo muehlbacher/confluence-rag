@@ -18,6 +18,7 @@ from typing import List, Optional
 
 from fastembed import SparseTextEmbedding
 from openai import OpenAI
+from openai.types import CreateEmbeddingResponse
 from qdrant_client import QdrantClient, models
 
 from config import Settings, get_settings
@@ -109,8 +110,15 @@ class Indexer:
 
     # -- embedding -------------------------------------------------------
     def _embed_dense(self, texts: List[str]) -> List[List[float]]:
-        resp = self._embed.embeddings.create(
-            model=self.settings.embed_model, input=texts
+        # NOTE: we go through the client's low-level .post() rather than
+        # embeddings.create() on purpose: the SDK convenience method auto-injects
+        # `encoding_format=base64`, which the LiteLLM gateway rejects for the
+        # qwen3-embedding model group. Building the body ourselves omits it, so
+        # the server returns plain float arrays.
+        resp = self._embed.post(
+            "/embeddings",
+            cast_to=CreateEmbeddingResponse,
+            body={"model": self.settings.embed_model, "input": texts},
         )
         return [d.embedding for d in resp.data]
 

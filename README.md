@@ -19,9 +19,12 @@ using OpenAI-compatible endpoints for generation and embeddings. See
 
 ### Deviations from the plan (driven by the live environment)
 
-- **Embedding model:** the plan assumes BGE-M3 (1024-dim); the available
-  endpoint doesn't offer it. Using **`jina-embeddings-v2-base-de`** (768-dim),
-  which is German-specialized and fits the mostly-German corpus. `EMBED_DIM=768`.
+- **Models:** the plan assumes BGE-M3 embeddings and a Qwen2.5 LLM; the endpoint
+  offers neither. Using **`qwen3-embedding-0.6b`** (1024-dim, `EMBED_DIM=1024`)
+  and **`qwen3.6-35b-a3b`** for generation. The embedding model is reached via
+  the OpenAI client's low-level `.post()` because the gateway rejects the
+  `encoding_format` param that `embeddings.create()` auto-injects (see
+  `src/ingest/index.py`).
 - **Qdrant:** no Docker on this host, so local dev uses qdrant-client's embedded
   mode via `QDRANT_PATH` (e.g. `qdrant_storage`). `docker-compose.yml` is still
   provided for server deployment — leave `QDRANT_PATH` empty to use it.
