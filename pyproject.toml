@@ -1,0 +1,43 @@
+[project]
+name = "confluence-rag"
+version = "0.1.0"
+description = "Retrieval-augmented Q&A over a self-hosted Confluence Data Center instance."
+requires-python = ">=3.9"
+
+# Dependencies are introduced milestone by milestone. M1 needs only the
+# Confluence REST client, config, and HTML-to-text for content hashing.
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "selectolax>=0.3.21",
+]
+
+[project.optional-dependencies]
+# Added as later milestones land (embeddings/index, retrieval, api).
+index = [
+    "openai>=1.30",
+    "qdrant-client>=1.9",
+]
+api = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+]
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["config"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
