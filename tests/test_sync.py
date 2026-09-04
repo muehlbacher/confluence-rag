@@ -14,6 +14,7 @@ import httpx
 import pytest
 
 from src.confluence.client import ConfluenceClient
+from src.confluence.extract import compute_content_hash, html_to_text
 from src.confluence.sync import (
     PageStateStore,
     SyncStats,
@@ -117,6 +118,30 @@ def test_has_read_restrictions_false_when_empty():
     )
     # top-level shape (no "restrictions" wrapper)
     assert not has_read_restrictions({"user": {"size": 0}, "group": {"size": 0}})
+
+
+# --- unit: text extraction drops non-content nodes ---------------------------
+
+def test_html_to_text_drops_style_and_script():
+    # Rendered macros emit inline <style>/<script>; their text is not content.
+    html = (
+        "<style>.rwui_id_abc {color: #fff;}</style>"
+        "<p>Real content here.</p>"
+        "<script>var x = 1;</script>"
+    )
+    text = html_to_text(html)
+    assert text == "Real content here."
+    assert "rwui" not in text and "color" not in text
+
+
+def test_content_hash_stable_against_per_render_css_uuids():
+    # Same visible content, different per-render UUID in a <style> block — the
+    # hash must not change (this is what broke the M1 no-op re-sync live).
+    body_a = "<style>.rwui_id_11111111 {color:#fff}</style><p>Docs body.</p>"
+    body_b = "<style>.rwui_id_99999999 {color:#fff}</style><p>Docs body.</p>"
+    ha = compute_content_hash("Title", html_to_text(body_a))
+    hb = compute_content_hash("Title", html_to_text(body_b))
+    assert ha == hb
 
 
 # --- acceptance: counts + restriction skip -----------------------------------

@@ -15,7 +15,7 @@ import argparse
 import sys
 
 from config import get_settings
-from src.confluence.client import ConfluenceClient
+from src.confluence.client import ConfluenceClient, ConfluenceSpaceNotFound
 from src.confluence.sync import PageStateStore, delta_sync, full_sync
 
 
@@ -36,26 +36,35 @@ def main() -> int:
     settings = get_settings()
     store = PageStateStore(settings.page_state_db)
 
-    with ConfluenceClient(settings.confluence_base_url, settings.confluence_pat) as client:
-        if args.since:
-            _log(f"Delta sync since {args.since!r} over spaces {settings.confluence_spaces}")
-            stats = delta_sync(
-                client=client,
-                store=store,
-                space_keys=settings.confluence_spaces,
-                since=args.since,
-                log=_log,
-            )
-        else:
-            _log(f"Full sync over spaces {settings.confluence_spaces}")
-            stats = full_sync(
-                client=client,
-                store=store,
-                space_keys=settings.confluence_spaces,
-                log=_log,
-            )
-
-    store.close()
+    try:
+        with ConfluenceClient(
+            settings.confluence_base_url, settings.confluence_pat
+        ) as client:
+            if args.since:
+                _log(
+                    f"Delta sync since {args.since!r} over spaces "
+                    f"{settings.confluence_spaces}"
+                )
+                stats = delta_sync(
+                    client=client,
+                    store=store,
+                    space_keys=settings.confluence_spaces,
+                    since=args.since,
+                    log=_log,
+                )
+            else:
+                _log(f"Full sync over spaces {settings.confluence_spaces}")
+                stats = full_sync(
+                    client=client,
+                    store=store,
+                    space_keys=settings.confluence_spaces,
+                    log=_log,
+                )
+    except ConfluenceSpaceNotFound as exc:
+        _log(f"ERROR: {exc}")
+        return 2
+    finally:
+        store.close()
 
     s = stats.as_dict()
     print(

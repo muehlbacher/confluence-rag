@@ -18,6 +18,17 @@ PAGE_EXPAND = "body.view,version,ancestors,space,metadata.labels"
 _DEFAULT_PAGE_LIMIT = 50
 
 
+class ConfluenceSpaceNotFound(Exception):
+    """An allowlisted space key does not exist / is not visible to this PAT."""
+
+    def __init__(self, space_key: str) -> None:
+        self.space_key = space_key
+        super().__init__(
+            f"Confluence space {space_key!r} not found (HTTP 404). Check "
+            f"CONFLUENCE_SPACES against the real space keys."
+        )
+
+
 class ConfluenceClient:
     """Authenticated client for a single Confluence DC instance."""
 
@@ -68,17 +79,23 @@ class ConfluenceClient:
         """
         start = 0
         while True:
-            data = self._get(
-                "/rest/api/content",
-                params={
-                    "spaceKey": space_key,
-                    "type": "page",
-                    "status": "current",
-                    "expand": expand,
-                    "limit": limit,
-                    "start": start,
-                },
-            )
+            try:
+                data = self._get(
+                    "/rest/api/content",
+                    params={
+                        "spaceKey": space_key,
+                        "type": "page",
+                        "status": "current",
+                        "expand": expand,
+                        "limit": limit,
+                        "start": start,
+                    },
+                )
+            except httpx.HTTPStatusError as exc:
+                # Confluence 404s on an unknown spaceKey; surface it clearly.
+                if exc.response.status_code == 404:
+                    raise ConfluenceSpaceNotFound(space_key) from exc
+                raise
             results = data.get("results", [])
             for page in results:
                 yield page

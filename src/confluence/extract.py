@@ -17,6 +17,14 @@ from selectolax.parser import HTMLParser
 
 _WS_RE = re.compile(r"\s+")
 
+# Non-content nodes whose text is never page content. Confluence's rendered
+# body.view carries inline <style>/<script> from macros (e.g. RefinedWiki emits
+# CSS with a fresh per-render UUID in every rule), which both pollutes chunk
+# text and makes the content hash unstable. Drop them before extracting text.
+# NOTE: fuller macro-chrome stripping (nav, empty structural nodes) is M2's job
+# in ingest/parse.py; here we do the minimum needed for a stable hash.
+_DROP_TAGS = ("script", "style", "noscript", "template")
+
 
 @dataclass
 class ExtractedPage:
@@ -38,7 +46,10 @@ def html_to_text(html: str) -> str:
     """Strip HTML to normalized visible text (whitespace-collapsed)."""
     if not html:
         return ""
-    text = HTMLParser(html).text(separator=" ")
+    tree = HTMLParser(html)
+    for node in tree.css(",".join(_DROP_TAGS)):
+        node.decompose()
+    text = tree.text(separator=" ")
     return _WS_RE.sub(" ", text).strip()
 
 
