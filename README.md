@@ -24,18 +24,25 @@ using OpenAI-compatible endpoints for generation and embeddings. See
   with inline `[n]` citations resolved to real pages, a two-stage no-context
   gate (empty retrieval *and* model-side refusal), and prompt-injection defense.
   FastAPI: `POST /query`, `POST /webhook`, `GET /health`.
-- M5: not started.
+- **M5 — Sync loop + hardening** ✅
+  Webhook wired into the sync path (create/update/delete propagation, verified
+  live end-to-end), `scripts/reindex.py`, retry/backoff on Confluence + reranker
+  (and the OpenAI SDK's own retries for embeddings/LLM), structured logging, and
+  retrieval tuning against the eval set.
 
-### Retrieval eval (M3, 20-question German set)
+### Retrieval eval (final, 20-question German set)
 
 | config | hit-rate@5 | MRR |
 |--------|-----------|-----|
-| reranker OFF (RRF fusion) | 0.950 | 0.699 |
-| reranker ON | 0.950 | **0.775** |
+| reranker OFF (RRF fusion) | 0.950 | 0.703 |
+| reranker ON | **1.000** | **0.818** |
 
-Config: `qwen3-embedding-0.6b` dense + Qdrant BM25, `RETRIEVE_TOP_K=20`,
-`RERANK_TOP_N=5`, `RERANK_SCORE_MIN=0.3`. Reranking lifts MRR ~11% relative.
-Run: `./.venv/bin/python -m eval.run_eval`.
+Config that produced these numbers: embeddings `qwen3-embedding-0.6b` (1024-dim)
+dense + Qdrant BM25 sparse, RRF fusion, reranker `bge-reranker-v2-m3`;
+`RETRIEVE_TOP_K=12`, `RERANK_TOP_N=5`, `RERANK_SCORE_MIN=0.05`,
+`CHUNK_MAX_TOKENS=512`. Reranking lifts MRR ~16% relative and closes the last
+top-5 miss. Tuning note: `RETRIEVE_TOP_K` was swept 6–40; 10–12 is the sweet
+spot (fewer distractors for the reranker). Run: `./.venv/bin/python -m eval.run_eval`.
 
 ### Deviations from the plan (driven by the live environment)
 
@@ -85,6 +92,9 @@ Confluence PAT may be supplied as `CONFLUENCE_PAT` or `CONFLUENCE_TOKEN`.
 
 # Extraction only, no embeddings / Qdrant (M1 behaviour)
 ./.venv/bin/python -m scripts.full_sync --no-index
+
+# Destructive drop + full rebuild (after model/dim/chunking changes)
+./.venv/bin/python -m scripts.reindex
 ```
 
 The script prints counts (`seen / indexed / skipped-restricted /

@@ -18,8 +18,10 @@ from src.confluence.extract import compute_content_hash, html_to_text
 from src.confluence.sync import (
     PageStateStore,
     SyncStats,
+    delete_page,
     full_sync,
     has_read_restrictions,
+    sync_page_by_id,
 )
 
 
@@ -53,8 +55,23 @@ class FakeConfluence:
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self._handle)
 
+    def _by_id(self, page_id: str):
+        for items in self.pages.values():
+            for p in items:
+                if p["id"] == page_id:
+                    return p
+        return None
+
     def _handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
+
+        # Single page fetch: /rest/api/content/{id} (no trailing sub-resource).
+        if path.startswith("/rest/api/content/") and path.count("/") == 4:
+            page_id = path.split("/")[4]
+            page = self._by_id(page_id)
+            if page is None:
+                return httpx.Response(404, json={"message": "not found"})
+            return httpx.Response(200, json=page)
 
         if path == "/rest/api/content":
             space = request.url.params.get("spaceKey")
@@ -203,6 +220,94 @@ def test_rerun_repulls_only_changed_pages(tmp_path):
     assert second.skipped_unchanged == 1
     assert any("INDEX page_id=1" in m for m in logs)
     assert not any("INDEX page_id=2" in m for m in logs)
+
+
+class FakeIndexer:
+    """Records index/delete operations, standing in for the real Qdrant indexer."""
+
+    def __init__(self):
+        self.indexed = []  # list of (page_id, content_hash)
+        self.deleted = []
+
+    def index_page(self, page):
+        self.indexed.append((page.page_id, page.content_hash))
+
+    def delete_page(self, page_id):
+        self.deleted.append(page_id)
+
+
+# --- M5: webhook create / update / delete propagation ------------------------
+
+def test_webhook_create_indexes_new_page(tmp_path):
+    pages = {"ENG": [make_page("10", "ENG", "New", "brand new page")]}
+    fake = FakeConfluence(pages, restricted=set())
+    store = PageStateStore(str(tmp_path / "s.db"))
+    idx = FakeIndexer()
+
+    reason = sync_page_by_id("10", client=make_client(fake), store=store, on_index=idx.index_page)
+
+    assert reason is None  # indexed
+    assert idx.indexed == [("10", store.get_hash("10"))]
+
+
+def test_webhook_update_reindexes_changed_page(tmp_path):
+    pages = {"ENG": [make_page("10", "ENG", "Doc", "v1")]}
+    fake = FakeConfluence(pages, restricted=set())
+    store = PageStateStore(str(tmp_path / "s.db"))
+    idx = FakeIndexer()
+
+    sync_page_by_id("10", client=make_client(fake), store=store, on_index=idx.index_page)
+    first_hash = store.get_hash("10")
+
+    # Page edited in Confluence.
+    pages["ENG"][0] = make_page("10", "ENG", "Doc", "v2 edited content")
+    fake.pages = pages
+    reason = sync_page_by_id("10", client=make_client(fake), store=store, on_index=idx.index_page)
+
+    assert reason is None
+    assert len(idx.indexed) == 2
+    assert store.get_hash("10") != first_hash  # hash advanced
+
+
+def test_webhook_update_unchanged_is_noop(tmp_path):
+    pages = {"ENG": [make_page("10", "ENG", "Doc", "same")]}
+    fake = FakeConfluence(pages, restricted=set())
+    store = PageStateStore(str(tmp_path / "s.db"))
+    idx = FakeIndexer()
+
+    sync_page_by_id("10", client=make_client(fake), store=store, on_index=idx.index_page)
+    reason = sync_page_by_id("10", client=make_client(fake), store=store, on_index=idx.index_page)
+
+    assert reason == "unchanged"
+    assert len(idx.indexed) == 1  # not re-indexed
+
+
+def test_webhook_update_restricted_page_is_skipped(tmp_path):
+    pages = {"ENG": [make_page("10", "ENG", "Secret", "now restricted")]}
+    fake = FakeConfluence(pages, restricted={"10"})
+    store = PageStateStore(str(tmp_path / "s.db"))
+    idx = FakeIndexer()
+
+    reason = sync_page_by_id("10", client=make_client(fake), store=store, on_index=idx.index_page)
+
+    assert reason == "restricted"
+    assert idx.indexed == []
+    assert store.get_hash("10") is None
+
+
+def test_webhook_delete_removes_page(tmp_path):
+    store = PageStateStore(str(tmp_path / "s.db"))
+    idx = FakeIndexer()
+    # seed page-state as if it were indexed
+    pages = {"ENG": [make_page("10", "ENG", "Doc", "content")]}
+    sync_page_by_id("10", client=make_client(FakeConfluence(pages, set())),
+                    store=store, on_index=idx.index_page)
+    assert store.get_hash("10") is not None
+
+    delete_page("10", store=store, on_delete=idx.delete_page)
+
+    assert idx.deleted == ["10"]
+    assert store.get_hash("10") is None
 
 
 def test_index_callback_receives_extracted_page(tmp_path):

@@ -24,14 +24,21 @@ from pydantic import BaseModel
 
 from config import get_settings
 from src.confluence.client import ConfluenceClient
-from src.confluence.sync import PageStateStore, SyncStats, sync_page
+from src.confluence.sync import (
+    PageStateStore,
+    delete_page,
+    sync_page_by_id,
+)
 from src.embeddings import Embedders
 from src.generation.answer import Rag
 from src.ingest.index import Indexer, _make_qdrant
+from src.logging_setup import configure_logging, get_logger
 from src.retrieval.rerank import Reranker
 from src.retrieval.search import Searcher
 
 T = TypeVar("T")
+
+_log = get_logger("api")
 
 
 # --- request/response models ------------------------------------------------
@@ -94,11 +101,15 @@ class Components:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_logging()
+    _log.info("startup event=init")
     app.state.c = Components()
+    _log.info("startup event=ready collection=%s", app.state.c.settings.qdrant_collection)
     try:
         yield
     finally:
         app.state.c.close()
+        _log.info("shutdown event=closed")
 
 
 app = FastAPI(title="Confluence RAG", version="0.1.0", lifespan=lifespan)
@@ -184,21 +195,20 @@ async def webhook(
     if not page_id:
         raise HTTPException(status_code=422, detail="could not find page id in payload")
 
-    # NOTE: M5 hardens this path (retry/backoff, structured logging, tests).
     def do_delete() -> dict:
-        c.indexer.delete_page(page_id)
-        c.store.delete(page_id)
+        delete_page(page_id, store=c.store, on_delete=c.indexer.delete_page)
         return {"status": "deleted", "page_id": page_id}
 
     def do_sync() -> dict:
-        raw = c.confluence.get_page(page_id)
-        stats = SyncStats()
-        reason = sync_page(
-            raw, client=c.confluence, store=c.store, stats=stats,
+        reason = sync_page_by_id(
+            page_id, client=c.confluence, store=c.store,
             on_index=c.indexer.index_page,
         )
         return {"status": "synced", "page_id": page_id, "result": reason or "indexed"}
 
     if any(e in event for e in _DELETE_EVENTS):
-        return await c.run(do_delete)
-    return await c.run(do_sync)
+        result = await c.run(do_delete)
+    else:
+        result = await c.run(do_sync)
+    _log.info("webhook event=%s page_id=%s result=%s", event or "?", page_id, result["status"])
+    return result

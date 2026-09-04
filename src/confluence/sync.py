@@ -184,6 +184,34 @@ def sync_page(
     return None
 
 
+def sync_page_by_id(
+    page_id: str,
+    *,
+    client: ConfluenceClient,
+    store: PageStateStore,
+    on_index: IndexFn = _noop_index,
+    stats: Optional[SyncStats] = None,
+    log: Optional[Callable[[str], None]] = None,
+) -> Optional[str]:
+    """Fetch one page by id and run it through the sync path (webhook create/update)."""
+    raw = client.get_page(page_id)
+    return sync_page(
+        raw, client=client, store=store, stats=stats or SyncStats(),
+        on_index=on_index, log=log,
+    )
+
+
+def delete_page(
+    page_id: str,
+    *,
+    store: PageStateStore,
+    on_delete: Callable[[str], None],
+) -> None:
+    """Remove a page from the index and page-state (webhook delete)."""
+    on_delete(page_id)
+    store.delete(page_id)
+
+
 def full_sync(
     *,
     client: ConfluenceClient,

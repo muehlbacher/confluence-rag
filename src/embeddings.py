@@ -25,6 +25,7 @@ class Embedders:
         self._client = OpenAI(
             base_url=self.settings.embed_base_url,
             api_key=self.settings.embed_api_key,
+            max_retries=3,  # SDK retries 429/5xx/timeouts with backoff
         )
         self._bm25 = SparseTextEmbedding(model_name=_BM25_MODEL)
 

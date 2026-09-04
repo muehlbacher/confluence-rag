@@ -14,16 +14,19 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import sys
 
 from config import get_settings
 from src.confluence.client import ConfluenceClient, ConfluenceSpaceNotFound
 from src.confluence.sync import PageStateStore, delta_sync, full_sync
 from src.ingest.index import Indexer
+from src.logging_setup import configure_logging, get_logger
+
+configure_logging()
+_logger = get_logger("scripts.full_sync")
 
 
 def _log(msg: str) -> None:
-    print(msg, file=sys.stderr)
+    _logger.info(msg)
 
 
 def main() -> int:

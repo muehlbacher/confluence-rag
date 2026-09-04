@@ -15,7 +15,11 @@ from typing import List, Optional
 import httpx
 
 from config import Settings, get_settings
+from src.logging_setup import get_logger
 from src.retrieval.search import Candidate
+from src.retry import call_with_retry
+
+_log = get_logger("retrieval.rerank")
 
 
 @dataclass
@@ -57,16 +61,20 @@ class Reranker:
             return []
 
         documents = [c.text for c in candidates]
-        resp = self._client.post(
-            self.settings.rerank_url,
-            json={
-                "model": self.settings.rerank_model,
-                "query": query,
-                "documents": documents,
-            },
-        )
-        resp.raise_for_status()
-        results = resp.json().get("results", [])
+
+        def do():
+            resp = self._client.post(
+                self.settings.rerank_url,
+                json={
+                    "model": self.settings.rerank_model,
+                    "query": query,
+                    "documents": documents,
+                },
+            )
+            resp.raise_for_status()
+            return resp.json().get("results", [])
+
+        results = call_with_retry(do, what="rerank", logger=_log)
 
         # Sort by relevance desc, keep those clearing the threshold, cap at top_n.
         results.sort(key=lambda r: r["relevance_score"], reverse=True)

@@ -11,6 +11,11 @@ from typing import Any, Dict, Iterator, List, Optional
 
 import httpx
 
+from src.logging_setup import get_logger
+from src.retry import call_with_retry
+
+_log = get_logger("confluence.client")
+
 # Expansions we always want on a page: rendered body, version (author +
 # lastModified), ancestors (for breadcrumbs), space (for the key), labels.
 PAGE_EXPAND = "body.view,version,ancestors,space,metadata.labels"
@@ -61,9 +66,13 @@ class ConfluenceClient:
 
     # -- low-level -------------------------------------------------------
     def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        resp = self._client.get(path, params=params)
-        resp.raise_for_status()
-        return resp.json()
+        def do() -> Dict[str, Any]:
+            resp = self._client.get(path, params=params)
+            resp.raise_for_status()
+            return resp.json()
+
+        # Retries transport errors + 429/5xx; 404 (unknown space) is terminal.
+        return call_with_retry(do, what=f"GET {path}", logger=_log)
 
     # -- pages -----------------------------------------------------------
     def iter_space_pages(

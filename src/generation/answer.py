@@ -120,7 +120,9 @@ class Rag:
         self.searcher = searcher or Searcher(self.settings)
         self.reranker = reranker or Reranker(self.settings)
         self.llm = llm or OpenAI(
-            base_url=self.settings.llm_base_url, api_key=self.settings.llm_api_key
+            base_url=self.settings.llm_base_url,
+            api_key=self.settings.llm_api_key,
+            max_retries=3,  # SDK retries 429/5xx/timeouts with backoff
         )
 
     def answer(self, question: str) -> AnswerResult:
