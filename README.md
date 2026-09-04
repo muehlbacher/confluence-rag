@@ -19,7 +19,12 @@ using OpenAI-compatible endpoints for generation and embeddings. See
   Dense + BM25 over Qdrant fused with RRF (Query API), cross-encoder reranking
   (BGE-reranker-v2-m3) to `RERANK_TOP_N` with a `RERANK_SCORE_MIN` gate, and an
   eval harness (hit-rate@k / MRR) over `eval/dataset.jsonl`.
-- M4–M5: not started.
+- **M4 — Generation with citations + API** ✅
+  `Rag` pipeline (search → rerank → LLM) grounded strictly in retrieved context,
+  with inline `[n]` citations resolved to real pages, a two-stage no-context
+  gate (empty retrieval *and* model-side refusal), and prompt-injection defense.
+  FastAPI: `POST /query`, `POST /webhook`, `GET /health`.
+- M5: not started.
 
 ### Retrieval eval (M3, 20-question German set)
 
@@ -43,6 +48,13 @@ Run: `./.venv/bin/python -m eval.run_eval`.
 - **Qdrant:** no Docker on this host, so local dev uses qdrant-client's embedded
   mode via `QDRANT_PATH` (e.g. `qdrant_storage`). `docker-compose.yml` is still
   provided for server deployment — leave `QDRANT_PATH` empty to use it.
+- **Reasoning LLM:** `qwen3.6-35b-a3b` spends the token budget "thinking"
+  before answering (a small `max_tokens` yields empty content). Generation
+  disables it via `chat_template_kwargs={"enable_thinking": false}`
+  (`LLM_DISABLE_THINKING`).
+- **Rerank threshold:** the plan's `RERANK_SCORE_MIN=0.3` was too high for
+  bge-reranker-v2-m3 on this corpus (in-corpus top-1 scores start ~0.145,
+  out-of-corpus ≤0.008). Calibrated to `0.05`; M5 formalizes the tuning.
 - **Python:** 3.9 (plan targets 3.11+); code is kept compatible.
 
 ## Setup
@@ -78,6 +90,27 @@ Confluence PAT may be supplied as `CONFLUENCE_PAT` or `CONFLUENCE_TOKEN`.
 The script prints counts (`seen / indexed / skipped-restricted /
 skipped-unchanged`) and the resulting Qdrant point count. A re-run re-pulls and
 re-embeds only pages whose content hash changed; an unchanged corpus is a no-op.
+
+## Serve the API
+
+```bash
+./.venv/bin/python -m pip install -e ".[api]"
+./.venv/bin/uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+```
+
+- `POST /query` — `{"question": "..."}` → `{answer, citations[], used_context}`.
+  ```bash
+  curl -s localhost:8000/query -H 'content-type: application/json' \
+    -d '{"question":"Wie erstelle ich einen S3 Bucket?"}'
+  ```
+- `GET /health` — reachability of Qdrant, the embeddings endpoint, and the LLM.
+- `POST /webhook` — secret-verified (header `X-Webhook-Secret` or `?secret=`);
+  syncs/deletes the affected page (hardened in M5).
+
+Note: in Qdrant **embedded** mode (`QDRANT_PATH` set) all vector-store access is
+funnelled through a single thread, since embedded storage is single-threaded.
+For real deployment run Qdrant as a server (leave `QDRANT_PATH` empty; use
+`docker-compose.yml`).
 
 ## Test
 

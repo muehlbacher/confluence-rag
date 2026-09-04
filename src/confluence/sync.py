@@ -163,7 +163,7 @@ def sync_page(
     Returns None if indexed, or a SKIP_* reason string otherwise.
     """
     stats.seen += 1
-    page = extract_page(raw)
+    page = extract_page(raw, base_url=client.base_url)
     _log = log or (lambda _m: None)
 
     # v1 safety rule, part 2: skip any page with view restrictions.

@@ -64,11 +64,19 @@ def _payload(page: ExtractedPage, chunk: Chunk) -> dict:
 class Indexer:
     """Owns the Qdrant client, the dense embedder, and the BM25 model."""
 
-    def __init__(self, settings: Optional[Settings] = None) -> None:
+    def __init__(
+        self,
+        settings: Optional[Settings] = None,
+        *,
+        qdrant: Optional[QdrantClient] = None,
+        embedders: Optional[Embedders] = None,
+    ) -> None:
         self.settings = settings or get_settings()
         self.collection = self.settings.qdrant_collection
-        self.qdrant = _make_qdrant(self.settings)
-        self.embedders = Embedders(self.settings)
+        # Injectable so the API can share ONE client — Qdrant embedded mode locks
+        # the storage path to a single client process-wide.
+        self.qdrant = qdrant or _make_qdrant(self.settings)
+        self.embedders = embedders or Embedders(self.settings)
 
     # -- collection ------------------------------------------------------
     def ensure_collection(self) -> None:

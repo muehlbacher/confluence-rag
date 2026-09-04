@@ -65,17 +65,24 @@ def compute_content_hash(title: str, text: str) -> str:
     return h.hexdigest()
 
 
-def _build_url(raw: Dict[str, Any]) -> str:
+def _build_url(raw: Dict[str, Any], base_url: str = "") -> str:
+    # In a list response `_links.base` is only at the top level, not per result,
+    # so per-page `_links` often carries just the relative `webui`. Fall back to
+    # the known instance base_url to always produce an absolute, clickable URL.
     links = raw.get("_links", {}) or {}
-    base = (links.get("base") or "").rstrip("/")
+    base = ((links.get("base") or base_url) or "").rstrip("/")
     webui = links.get("webui") or ""
     if base and webui:
         return f"{base}{webui}"
     return webui or base
 
 
-def extract_page(raw: Dict[str, Any]) -> ExtractedPage:
-    """Build an `ExtractedPage` from a single content result dict."""
+def extract_page(raw: Dict[str, Any], base_url: str = "") -> ExtractedPage:
+    """Build an `ExtractedPage` from a single content result dict.
+
+    `base_url` is the Confluence instance base, used to absolutize the citation
+    URL when the per-page `_links` only carry a relative path.
+    """
     page_id = str(raw.get("id", ""))
     title = raw.get("title", "") or ""
 
@@ -102,7 +109,7 @@ def extract_page(raw: Dict[str, Any]) -> ExtractedPage:
         page_id=page_id,
         space_key=space_key,
         title=title,
-        url=_build_url(raw),
+        url=_build_url(raw, base_url),
         labels=labels,
         author=author,
         last_modified=last_modified,

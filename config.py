@@ -40,6 +40,16 @@ class Settings(BaseSettings):
     llm_base_url: str = "http://llm:8000/v1"
     llm_api_key: str = "not-needed"
     llm_model: str = "qwen2.5-32b-instruct"
+    # Generous budget: reasoning models (e.g. qwen3-a3b) spend tokens in a
+    # reasoning channel before emitting the answer, so a small cap yields empty
+    # content. Answer + reasoning must both fit.
+    llm_max_tokens: int = 1500
+    llm_temperature: float = 0.0
+    # Qwen3 reasoning models spend the token budget "thinking" before answering,
+    # which is wasteful (and non-deterministically starves the answer) for
+    # grounded Q&A. Disable it via chat_template_kwargs when the endpoint honors
+    # it. Set false for models/endpoints that reject the flag.
+    llm_disable_thinking: bool = True
 
     # --- Embeddings (OpenAI-compatible, BGE-M3) ---
     embed_base_url: str = "http://embed:8080/v1"
