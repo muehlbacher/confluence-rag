@@ -15,7 +15,22 @@ using OpenAI-compatible endpoints for generation and embeddings. See
   (tables/code kept whole, split only above the embedder's context limit),
   dense embeddings via the OpenAI-compatible endpoint + BM25 sparse vectors,
   upserted to Qdrant (named `dense` + `bm25` vectors, per-page replace).
-- M3–M5: not started.
+- **M3 — Hybrid retrieval + rerank + eval** ✅
+  Dense + BM25 over Qdrant fused with RRF (Query API), cross-encoder reranking
+  (BGE-reranker-v2-m3) to `RERANK_TOP_N` with a `RERANK_SCORE_MIN` gate, and an
+  eval harness (hit-rate@k / MRR) over `eval/dataset.jsonl`.
+- M4–M5: not started.
+
+### Retrieval eval (M3, 20-question German set)
+
+| config | hit-rate@5 | MRR |
+|--------|-----------|-----|
+| reranker OFF (RRF fusion) | 0.950 | 0.699 |
+| reranker ON | 0.950 | **0.775** |
+
+Config: `qwen3-embedding-0.6b` dense + Qdrant BM25, `RETRIEVE_TOP_K=20`,
+`RERANK_TOP_N=5`, `RERANK_SCORE_MIN=0.3`. Reranking lifts MRR ~11% relative.
+Run: `./.venv/bin/python -m eval.run_eval`.
 
 ### Deviations from the plan (driven by the live environment)
 

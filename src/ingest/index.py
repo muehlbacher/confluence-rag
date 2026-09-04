@@ -16,19 +16,16 @@ from __future__ import annotations
 import uuid
 from typing import List, Optional
 
-from fastembed import SparseTextEmbedding
-from openai import OpenAI
-from openai.types import CreateEmbeddingResponse
 from qdrant_client import QdrantClient, models
 
 from config import Settings, get_settings
 from src.confluence.extract import ExtractedPage
+from src.embeddings import Embedders
 from src.ingest.chunk import Chunk, chunk_page
 from src.ingest.parse import parse_blocks
 
 DENSE_VECTOR = "dense"
 SPARSE_VECTOR = "bm25"
-_BM25_MODEL = "Qdrant/bm25"
 
 # Stable namespace so a chunk_id always maps to the same Qdrant point id
 # (re-index overwrites in place rather than duplicating).
@@ -71,11 +68,7 @@ class Indexer:
         self.settings = settings or get_settings()
         self.collection = self.settings.qdrant_collection
         self.qdrant = _make_qdrant(self.settings)
-        self._embed = OpenAI(
-            base_url=self.settings.embed_base_url,
-            api_key=self.settings.embed_api_key,
-        )
-        self._bm25 = SparseTextEmbedding(model_name=_BM25_MODEL)
+        self.embedders = Embedders(self.settings)
 
     # -- collection ------------------------------------------------------
     def ensure_collection(self) -> None:
@@ -108,30 +101,6 @@ class Indexer:
             self.qdrant.delete_collection(self.collection)
         self.ensure_collection()
 
-    # -- embedding -------------------------------------------------------
-    def _embed_dense(self, texts: List[str]) -> List[List[float]]:
-        # NOTE: we go through the client's low-level .post() rather than
-        # embeddings.create() on purpose: the SDK convenience method auto-injects
-        # `encoding_format=base64`, which the LiteLLM gateway rejects for the
-        # qwen3-embedding model group. Building the body ourselves omits it, so
-        # the server returns plain float arrays.
-        resp = self._embed.post(
-            "/embeddings",
-            cast_to=CreateEmbeddingResponse,
-            body={"model": self.settings.embed_model, "input": texts},
-        )
-        return [d.embedding for d in resp.data]
-
-    def _embed_sparse(self, texts: List[str]) -> List[models.SparseVector]:
-        out = []
-        for emb in self._bm25.embed(texts):
-            out.append(
-                models.SparseVector(
-                    indices=emb.indices.tolist(), values=emb.values.tolist()
-                )
-            )
-        return out
-
     # -- indexing --------------------------------------------------------
     def index_page(self, page: ExtractedPage) -> int:
         """Parse -> chunk -> embed -> replace all points for this page.
@@ -151,8 +120,8 @@ class Indexer:
             return 0
 
         texts = [c.text for c in chunks]
-        dense = self._embed_dense(texts)
-        sparse = self._embed_sparse(texts)
+        dense = self.embedders.dense(texts)
+        sparse = self.embedders.sparse(texts)
 
         points = [
             models.PointStruct(

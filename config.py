@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     # --- Reranker ---
     rerank_url: str = "http://rerank:8080/rerank"
     rerank_model: str = "bge-reranker-v2-m3"
+    rerank_api_key: str = ""  # Bearer token if the reranker is behind an API gateway
 
     # --- Qdrant ---
     qdrant_url: str = "http://qdrant:6333"

@@ -1,0 +1,20 @@
+{"question": "Wie lege ich über Rancher einen neuen Kubernetes-Cluster an?", "gold_page_ids": ["97853961"]}
+{"question": "Wie entferne ich einen nicht mehr benötigten Kubernetes-Cluster wieder?", "gold_page_ids": ["97853982"]}
+{"question": "Wie bringe ich mein Kubernetes-Cluster auf eine neue Version?", "gold_page_ids": ["97860085"]}
+{"question": "Wie viele Nodes oder Cluster darf ich maximal betreiben?", "gold_page_ids": ["224892091"]}
+{"question": "Wie kann ich mein Cluster vorübergehend stilllegen, um Kosten zu sparen?", "gold_page_ids": ["165990999"]}
+{"question": "Wie greife ich per Kommandozeile auf meinen Objektspeicher zu?", "gold_page_ids": ["116194199"]}
+{"question": "Wie lege ich einen neuen Bucket für den Objektspeicher an?", "gold_page_ids": ["165987065"]}
+{"question": "Wie sichere ich einzelne Volumes per Momentaufnahme?", "gold_page_ids": ["109214943"]}
+{"question": "Wie sorge ich dafür, dass meine Pods bei Last automatisch skalieren?", "gold_page_ids": ["175814255"]}
+{"question": "Wie begrenze ich den Zugriff auf einen Loadbalancer?", "gold_page_ids": ["109187885"]}
+{"question": "Mein VPN auf dem MacBook verbindet nicht, wie installiere ich den Client?", "gold_page_ids": ["6685020"]}
+{"question": "Wie bekomme ich VPN-Zugang auf meinem Windows-Rechner?", "gold_page_ids": ["6685023"]}
+{"question": "Wie richte ich den neuen EMS VPN-Client unter Ubuntu ein?", "gold_page_ids": ["665169246"]}
+{"question": "Wie aktiviere ich einen zweiten Faktor per Einmalpasswort für meinen Login?", "gold_page_ids": ["132532120"]}
+{"question": "Wie hinterlege ich meinen YubiKey im Keycloak unter Windows?", "gold_page_ids": ["132532133"]}
+{"question": "Welche Regeln gelten für sichere Passwörter und Schlüssel?", "gold_page_ids": ["6684929"]}
+{"question": "Der Speicherplatz unserer SharePoint-Gruppe ist voll, wie vergrößere ich ihn?", "gold_page_ids": ["518984244"]}
+{"question": "Wie stelle ich eine Weiterleitung eingehender Anrufe in Teams ein?", "gold_page_ids": ["76926502"]}
+{"question": "Mein Kalender wird nicht angezeigt, was kann ich tun?", "gold_page_ids": ["239088060"]}
+{"question": "Ich habe mein Firmen-Notebook verloren, was muss ich melden?", "gold_page_ids": ["6685066"]}
