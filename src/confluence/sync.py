@@ -136,6 +136,11 @@ class PageStateStore:
         with self._conn:
             self._conn.execute("DELETE FROM page_state WHERE page_id = ?", (page_id,))
 
+    def clear(self) -> None:
+        """Wipe all page-state (used with a collection recreate for a clean rebuild)."""
+        with self._conn:
+            self._conn.execute("DELETE FROM page_state")
+
     def close(self) -> None:
         self._conn.close()
 

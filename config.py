@@ -55,6 +55,14 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://qdrant:6333"
     qdrant_api_key: str = ""
     qdrant_collection: str = "confluence"
+    # If set, use qdrant-client local (embedded) mode at this path instead of a
+    # server URL — lets M2 run without a Qdrant daemon / docker.
+    qdrant_path: str = ""
+
+    # --- Chunking ---
+    chunk_max_tokens: int = 512
+    # Hard ceiling for whole tables/code blocks (embedder context limit).
+    chunk_hard_max_tokens: int = 5000
 
     # --- Retrieval tuning ---
     retrieve_top_k: int = 20

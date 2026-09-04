@@ -1,0 +1,22 @@
+# Qdrant vector store for the RAG service.
+#
+# Local dev without Docker: set QDRANT_PATH (e.g. qdrant_storage) in .env to run
+# qdrant-client in embedded mode instead of talking to this service.
+#
+# The LLM / embedding / reranker servers are assumed to run elsewhere (the app
+# only needs their URLs); stub services can be added here if you colocate them.
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    restart: unless-stopped
+    ports:
+      - "6333:6333"   # REST / gRPC HTTP
+      - "6334:6334"   # gRPC
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    # Uncomment to require an API key (also set QDRANT_API_KEY in .env):
+    # environment:
+    #   QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+
+volumes:
+  qdrant_storage:
