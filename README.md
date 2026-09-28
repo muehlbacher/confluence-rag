@@ -1,129 +1,144 @@
 # Confluence RAG
 
-Retrieval-augmented Q&A over a self-hosted **Confluence Data Center** instance,
-using OpenAI-compatible endpoints for generation and embeddings. See
-[`plan.md`](plan.md) for the full spec and milestone plan.
+**Ask your company wiki a question and get an answer with sources.**
 
-## Status
+This is a self-hosted retrieval-augmented Q&A system for **Confluence Data Center**. You ask in plain language. It finds the relevant pages, answers only from what they say, and cites every claim with a link to the source page. When the wiki doesn't contain the answer, it says so instead of guessing.
 
-- **M1 — Extraction + sync foundation** ✅
-  Confluence REST client (PAT auth, pagination, CQL delta, read-restriction
-  lookup), page extraction + metadata + content hashing, SQLite page-state
-  store, and the v1 safety rule (space allowlist + skip restricted pages).
-- **M2 — Chunk + embed + index** ✅
-  `body.view` → clean typed blocks (parse), heading-aware breadcrumb chunking
-  (tables/code kept whole, split only above the embedder's context limit),
-  dense embeddings via the OpenAI-compatible endpoint + BM25 sparse vectors,
-  upserted to Qdrant (named `dense` + `bm25` vectors, per-page replace).
-- **M3 — Hybrid retrieval + rerank + eval** ✅
-  Dense + BM25 over Qdrant fused with RRF (Query API), cross-encoder reranking
-  (BGE-reranker-v2-m3) to `RERANK_TOP_N` with a `RERANK_SCORE_MIN` gate, and an
-  eval harness (hit-rate@k / MRR) over `eval/dataset.jsonl`.
-- **M4 — Generation with citations + API** ✅
-  `Rag` pipeline (search → rerank → LLM) grounded strictly in retrieved context,
-  with inline `[n]` citations resolved to real pages, a two-stage no-context
-  gate (empty retrieval *and* model-side refusal), and prompt-injection defense.
-  FastAPI: `POST /query`, `POST /webhook`, `GET /health`.
-- **M5 — Sync loop + hardening** ✅
-  Webhook wired into the sync path (create/update/delete propagation, verified
-  live end-to-end), `scripts/reindex.py`, retry/backoff on Confluence + reranker
-  (and the OpenAI SDK's own retries for embeddings/LLM), structured logging, and
-  retrieval tuning against the eval set.
+It runs entirely on your own infrastructure against any OpenAI-compatible endpoint, so no wiki content leaves your network.
 
-### Retrieval eval (final, 20-question German set)
+```bash
+curl -s localhost:8000/query -H 'content-type: application/json' \
+  -d '{"question":"Wie erstelle ich einen S3 Bucket?"}'
+# → { "answer": "... [1] ... [2]", "citations": [ {title, url}, ... ], "used_context": true }
+```
 
-| config | hit-rate@5 | MRR |
-|--------|-----------|-----|
-| reranker OFF (RRF fusion) | 0.950 | 0.703 |
-| reranker ON | **1.000** | **0.818** |
+---
 
-Config that produced these numbers: embeddings `qwen3-embedding-0.6b` (1024-dim)
-dense + Qdrant BM25 sparse, RRF fusion, reranker `bge-reranker-v2-m3`;
-`RETRIEVE_TOP_K=12`, `RERANK_TOP_N=5`, `RERANK_SCORE_MIN=0.05`,
-`CHUNK_MAX_TOKENS=512`. Reranking lifts MRR ~16% relative and closes the last
-top-5 miss. Tuning note: `RETRIEVE_TOP_K` was swept 6–40; 10–12 is the sweet
-spot (fewer distractors for the reranker). Run: `./.venv/bin/python -m eval.run_eval`.
+## Results
 
-### Deviations from the plan (driven by the live environment)
+Measured on a 20-question German evaluation set against a real Confluence instance:
 
-- **Models:** the plan assumes BGE-M3 embeddings and a Qwen2.5 LLM; the endpoint
-  offers neither. Using **`qwen3-embedding-0.6b`** (1024-dim, `EMBED_DIM=1024`)
-  and **`qwen3.6-35b-a3b`** for generation. The embedding model is reached via
-  the OpenAI client's low-level `.post()` because the gateway rejects the
-  `encoding_format` param that `embeddings.create()` auto-injects (see
-  `src/ingest/index.py`).
-- **Qdrant:** no Docker on this host, so local dev uses qdrant-client's embedded
-  mode via `QDRANT_PATH` (e.g. `qdrant_storage`). `docker-compose.yml` is still
-  provided for server deployment — leave `QDRANT_PATH` empty to use it.
-- **Reasoning LLM:** `qwen3.6-35b-a3b` spends the token budget "thinking"
-  before answering (a small `max_tokens` yields empty content). Generation
-  disables it via `chat_template_kwargs={"enable_thinking": false}`
-  (`LLM_DISABLE_THINKING`).
-- **Rerank threshold:** the plan's `RERANK_SCORE_MIN=0.3` was too high for
-  bge-reranker-v2-m3 on this corpus (in-corpus top-1 scores start ~0.145,
-  out-of-corpus ≤0.008). Calibrated to `0.05`; M5 formalizes the tuning.
-- **Python:** 3.9 (plan targets 3.11+); code is kept compatible.
+| Retrieval setup | Hit-rate@5 | MRR |
+|---|---|---|
+| Hybrid search (dense + BM25, RRF fusion) | 0.950 | 0.703 |
+| **+ cross-encoder reranking** | **1.000** | **0.818** |
 
-## Setup
+Reranking raises MRR by about 16% relative and removes the last top-5 miss. Every question now has a correct source among the top five results, and it is usually ranked first.
 
-Requires Python 3.9+ (the plan targets 3.11+; only 3.9 is available on this
-host, and the code is kept compatible with both).
+This is a small eval set. It is enough to catch regressions and tune parameters, but it does not prove performance on every corpus.
+
+---
+
+## How it works
+
+```mermaid
+flowchart LR
+    C[Confluence DC] -- REST + webhooks --> S[Sync & extract]
+    S --> K[Heading-aware chunking]
+    K --> E[Dense embeddings + BM25]
+    E --> Q[(Qdrant)]
+    U[User question] --> H[Hybrid search · RRF]
+    Q --> H
+    H --> R[Cross-encoder rerank]
+    R --> G{Enough context?}
+    G -- no --> N[“Not in the wiki”]
+    G -- yes --> L[LLM answer with citations]
+```
+
+**Ingestion**
+- Crawls allowlisted spaces through the Confluence REST API: PAT auth, pagination, CQL delta queries.
+- Parses rendered page HTML into typed blocks, then chunks it along headings with a breadcrumb trail. Tables and code blocks are never split mid-way.
+- Content hashing makes re-syncs cheap: only changed pages are re-embedded, and an unchanged wiki is a no-op.
+- Webhooks propagate page creates, updates and deletes in near real time. This is verified end-to-end against a live instance.
+
+**Retrieval**
+- Dense vectors (`qwen3-embedding-0.6b`) and BM25 sparse vectors go into the same Qdrant collection and are fused with Reciprocal Rank Fusion.
+- `bge-reranker-v2-m3` rescores the candidates, and a calibrated score threshold filters out weak matches.
+
+**Generation**
+- Answers are grounded strictly in the retrieved context, and inline `[n]` citations resolve to real page URLs.
+- A two-stage "no answer" gate handles both empty retrieval and model-side refusal.
+- Retrieved page content is treated as data, not instructions, to defend against prompt injection.
+
+---
+
+## Design decisions worth calling out
+
+- **Permissions first.** Restricted pages are skipped entirely in v1. Leaking a page someone shouldn't see is worse than missing an answer. Per-user permission filtering is the natural next step.
+- **Hybrid over pure vector search.** Internal wikis are full of product names, hostnames and abbreviations. BM25 catches exact terms that embeddings blur.
+- **Thresholds are calibrated, not guessed.** The planned rerank cutoff of 0.3 would have rejected good answers on this corpus. In-corpus top hits scored around 0.145 and off-topic questions scored ≤ 0.008, so the cutoff is set to 0.05. `RETRIEVE_TOP_K` was swept from 6 to 40, and 10–12 performed best because more candidates only gave the reranker extra distractors.
+- **The system adapts to the environment it runs in.** The target gateway didn't offer the planned models and rejected a parameter the OpenAI SDK injects, and the host had no Docker. The code works around all three. The details are listed below.
+
+---
+
+## Stack
+
+Python · FastAPI · Qdrant (dense + sparse) · OpenAI-compatible LLM & embeddings · `bge-reranker-v2-m3` · SQLite for sync state · pytest
+
+**API:** `POST /query` · `POST /webhook` (secret-verified) · `GET /health` (checks Qdrant, embeddings and the LLM)
+
+---
+
+## Quickstart
+
+Requires Python 3.9+.
 
 ```bash
 python3 -m venv .venv
-./.venv/bin/python -m pip install -e ".[dev,index]"
-cp .env.example .env      # then fill in real values
+./.venv/bin/python -m pip install -e ".[dev,index,api]"
+cp .env.example .env            # Confluence URL + PAT, model endpoints, space allowlist
 ```
 
-Configuration is entirely environment-driven (`.env`, never committed). The
-Confluence PAT may be supplied as `CONFLUENCE_PAT` or `CONFLUENCE_TOKEN`.
-
-## Run
-
+**Index your wiki**
 ```bash
-# Full crawl + index of the allowlisted spaces (CONFLUENCE_SPACES)
-./.venv/bin/python -m scripts.full_sync
-
-# Drop the Qdrant collection + page-state, then rebuild from scratch
-./.venv/bin/python -m scripts.full_sync --recreate
-
-# Delta re-pull of pages changed since a timestamp
-./.venv/bin/python -m scripts.full_sync --since "2026-09-01 00:00"
-
-# Extraction only, no embeddings / Qdrant (M1 behaviour)
-./.venv/bin/python -m scripts.full_sync --no-index
-
-# Destructive drop + full rebuild (after model/dim/chunking changes)
-./.venv/bin/python -m scripts.reindex
+./.venv/bin/python -m scripts.full_sync                          # full crawl + index
+./.venv/bin/python -m scripts.full_sync --since "2026-09-01 00:00"  # delta
+./.venv/bin/python -m scripts.full_sync --no-index               # extraction only
+./.venv/bin/python -m scripts.reindex                            # drop + rebuild (after model/chunking changes)
 ```
 
-The script prints counts (`seen / indexed / skipped-restricted /
-skipped-unchanged`) and the resulting Qdrant point count. A re-run re-pulls and
-re-embeds only pages whose content hash changed; an unchanged corpus is a no-op.
-
-## Serve the API
-
+**Serve**
 ```bash
-./.venv/bin/python -m pip install -e ".[api]"
 ./.venv/bin/uvicorn src.api.main:app --host 0.0.0.0 --port 8000
 ```
 
-- `POST /query` — `{"question": "..."}` → `{answer, citations[], used_context}`.
-  ```bash
-  curl -s localhost:8000/query -H 'content-type: application/json' \
-    -d '{"question":"Wie erstelle ich einen S3 Bucket?"}'
-  ```
-- `GET /health` — reachability of Qdrant, the embeddings endpoint, and the LLM.
-- `POST /webhook` — secret-verified (header `X-Webhook-Secret` or `?secret=`);
-  syncs/deletes the affected page (hardened in M5).
-
-Note: in Qdrant **embedded** mode (`QDRANT_PATH` set) all vector-store access is
-funnelled through a single thread, since embedded storage is single-threaded.
-For real deployment run Qdrant as a server (leave `QDRANT_PATH` empty; use
-`docker-compose.yml`).
-
-## Test
-
+**Evaluate and test**
 ```bash
+./.venv/bin/python -m eval.run_eval    # hit-rate@k / MRR over eval/dataset.jsonl
 ./.venv/bin/python -m pytest
 ```
+
+All configuration comes from environment variables in `.env`, which is never committed. The Confluence PAT can be set as `CONFLUENCE_PAT` or `CONFLUENCE_TOKEN`.
+
+**Qdrant mode:** set `QDRANT_PATH` for embedded local storage, which is single-threaded and all access is serialized. For real deployments, leave `QDRANT_PATH` empty and run Qdrant as a server via `docker-compose.yml`.
+
+---
+
+## Deviations from the original plan
+
+| Planned | Actual | Why |
+|---|---|---|
+| BGE-M3 embeddings | `qwen3-embedding-0.6b` (1024-dim) | Not offered by the endpoint. It is called via the client's low-level `.post()` because the gateway rejects the `encoding_format` param the SDK injects (see `src/ingest/index.py`). |
+| Qwen2.5 LLM | `qwen3.6-35b-a3b` | Not offered by the endpoint. This is a reasoning model, so thinking is disabled (`LLM_DISABLE_THINKING`). Otherwise it spends the whole token budget thinking and returns empty answers. |
+| Rerank min 0.3 | 0.05 | Calibrated on the real score distribution (see above). |
+| Qdrant in Docker | Embedded mode for dev | There is no Docker on the dev host. Compose is still provided for deployment. |
+| Python 3.11+ | 3.9-compatible | This is the only version available on the host. |
+
+---
+
+## Status
+
+The full spec and milestones are in [`plan.md`](plan.md). All five milestones are complete:
+
+- **M1:** extraction and sync foundation
+- **M2:** chunking, embedding and indexing
+- **M3:** hybrid retrieval, reranking and eval
+- **M4:** cited generation and API
+- **M5:** webhook sync loop and hardening
+
+---
+
+## About
+
+Built by **Dominik**, a freelance engineer in Vienna working on LLM/RAG systems, Kafka platforms and infrastructure automation.
+If you want something like this on your own Confluence, or a second opinion on your RAG setup, get in touch: [LinkedIn](#) · [Email](#)
