@@ -4,7 +4,7 @@
 
 This is a self-hosted retrieval-augmented Q&A system for **Confluence Data Center**. You ask in plain language. It finds the relevant pages, answers only from what they say, and cites every claim with a link to the source page. When the wiki doesn't contain the answer, it says so instead of guessing.
 
-It runs entirely on your own infrastructure against any OpenAI-compatible endpoint, so no wiki content leaves your network.
+It runs entirely on your own infrastructure against any OpenAI-compatible endpoint, so no wiki content leaves your network or the GDPR area.
 
 ```bash
 curl -s localhost:8000/query -H 'content-type: application/json' \
