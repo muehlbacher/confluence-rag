@@ -14,21 +14,6 @@ curl -s localhost:8000/query -H 'content-type: application/json' \
 
 ---
 
-## Results
-
-Measured on a 20-question German evaluation set against a real Confluence instance:
-
-| Retrieval setup | Hit-rate@5 | MRR |
-|---|---|---|
-| Hybrid search (dense + BM25, RRF fusion) | 0.950 | 0.703 |
-| **+ cross-encoder reranking** | **1.000** | **0.818** |
-
-Reranking raises MRR by about 16% relative and removes the last top-5 miss. Every question now has a correct source among the top five results, and it is usually ranked first.
-
-This is a small eval set. It is enough to catch regressions and tune parameters, but it does not prove performance on every corpus.
-
----
-
 ## How it works
 
 ```mermaid
@@ -140,5 +125,5 @@ The full spec and milestones are in [`plan.md`](plan.md). All five milestones ar
 
 ## About
 
-Built by **Dominik**, a freelance engineer in Vienna working on LLM/RAG systems, Kafka platforms and infrastructure automation.
-If you want something like this on your own Confluence, or a second opinion on your RAG setup, get in touch: [LinkedIn](#) · [Email](#)
+Built by **Dominik**, a freelance engineer in Vienna working on LLM/RAG systems, years of experience in automation and building software that really adds value.
+If you want something like this on your own Confluence, or a second opinion on your RAG setup, get in touch: [LinkedIn](https://www.linkedin.com/in/dominik-m%C3%BChlbacher-387870150/) · [Email](office@dominikmuehlbacher.at)
